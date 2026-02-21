@@ -37,6 +37,152 @@ function ensureDailyMidnightTrigger(): void {
   }
 }
 
+function hasDailyMidnightTrigger(): boolean {
+  const handler = "ftUpdateTravailleurSocial_24h";
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    return triggers.some(
+      (t) =>
+        t.getHandlerFunction &&
+        t.getHandlerFunction() === handler &&
+        t.getEventType &&
+        t.getEventType() === ScriptApp.EventType.CLOCK
+    );
+  } catch (_e) {
+    return false;
+  }
+}
+
+function canUseTriggers(): boolean {
+  try {
+    ScriptApp.getProjectTriggers();
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function canUseProperties(): boolean {
+  try {
+    PropertiesService.getScriptProperties().getKeys();
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function canUseCache(): boolean {
+  try {
+    const c = CacheService.getScriptCache();
+    c.put("FT_HEALTHCHECK", "1", 10);
+    c.remove("FT_HEALTHCHECK");
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+/**
+ * Non-blocking health check meant to run from onOpen.
+ * It should NOT prompt for OAuth or secrets.
+ */
+export function ftHealthCheckSilent(): void {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const issues: string[] = [];
+
+  // Basic access to Spreadsheet
+  try {
+    ss.getId();
+  } catch (_e) {
+    issues.push("Accès au Spreadsheet: non autorisé.");
+  }
+
+  // Vital services
+  if (!canUseProperties())
+    issues.push("Propriétés du script (Script Properties): non autorisé.");
+  if (!canUseCache()) issues.push("CacheService: non autorisé.");
+
+  // Secrets present?
+  try {
+    if (!getSecrets()) issues.push("Secrets manquants (FT_CLIENT_ID / FT_CLIENT_SECRET)." );
+  } catch (_e) {
+    issues.push("Lecture des secrets: impossible (droits Script Properties).");
+  }
+
+  // Trigger daily
+  if (!canUseTriggers()) {
+    issues.push("Triggers (déclencheurs): non autorisé.");
+  } else if (!hasDailyMidnightTrigger()) {
+    issues.push("Déclencheur quotidien (00h) absent. Lancez France Travail » Initialiser.");
+  }
+
+  // Report as toast (non-blocking)
+  try {
+    if (issues.length) {
+      ss.toast(
+        `Health check: ${issues.length} point(s) à corriger.\n` + issues.slice(0, 3).join("\n"),
+        "France Travail",
+        20
+      );
+    }
+  } catch (_e) {
+    // ignore
+  }
+
+  // Also log full details for admin
+  if (issues.length) {
+    console.warn(`${CONFIG.LOG_PREFIX} Health check issues:\n- ${issues.join("\n- ")}`);
+  } else {
+    console.log(`${CONFIG.LOG_PREFIX} Health check OK`);
+  }
+}
+
+/**
+ * Interactive health check from menu.
+ */
+export function ftHealthCheck(): void {
+  const ui = SpreadsheetApp.getUi();
+  const issues: string[] = [];
+
+  // Permissions / services
+  if (!canUseProperties()) issues.push("Propriétés du script: NON");
+  if (!canUseCache()) issues.push("CacheService: NON");
+  if (!canUseTriggers()) issues.push("Triggers: NON");
+
+  // Secrets
+  const secretsOk = (() => {
+    try {
+      return Boolean(getSecrets());
+    } catch (_e) {
+      return false;
+    }
+  })();
+  if (!secretsOk) issues.push("Secrets FT_CLIENT_ID / FT_CLIENT_SECRET: manquants ou illisibles");
+
+  // Trigger
+  const triggerOk = canUseTriggers() ? hasDailyMidnightTrigger() : false;
+  if (!triggerOk) issues.push("Déclencheur quotidien 00h: absent");
+
+  const title = "France Travail » Health check";
+  if (!issues.length) {
+    ui.alert(
+      title,
+      "Tout est OK.\n\nSecrets présents, droits valides, déclencheur quotidien en place.",
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
+  const msg =
+    "Points à corriger :\n\n- " +
+    issues.join("\n- ") +
+    "\n\nActions :\n" +
+    "» France Travail > Initialiser (crée le déclencheur)\n" +
+    "» France Travail > Configurer les secrets";
+
+  ui.alert(title, msg, ui.ButtonSet.OK);
+}
+
 /**
  * Explicit initializer to be run by the user once.
  * This is the right place to trigger the OAuth consent screen.
@@ -87,11 +233,18 @@ export function onOpen(): void {
 
   buildMenu();
 
+  // Silent health check (non-blocking, no prompts)
+  try {
+    ftHealthCheckSilent();
+  } catch (_e) {
+    // ignore
+  }
+
   // First-time guidance: ask user to run init (explicit consent)
   try {
     if (!isInitialized()) {
       ss.toast(
-        "Première utilisation : autorisez le script.\nMenu France Travail → Initialiser / Autoriser",
+        "Première utilisation : autorisez le script.\nMenu France Travail » Initialiser / Autoriser",
         "France Travail",
         20
       );
@@ -104,7 +257,7 @@ export function onOpen(): void {
   try {
     if (!getSecrets()) {
       ss.toast(
-        "Secrets France Travail manquants.\nMenu France Travail → Configurer les secrets.",
+        "Secrets France Travail manquants.\nMenu France Travail » Configurer les secrets.",
         "France Travail",
         20
       );
@@ -120,6 +273,7 @@ export function buildMenu(): void {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu("France Travail")
     .addItem("Initialiser", "ftInit")
+    .addItem("Health check", "ftHealthCheck")
     .addSeparator()
     .addItem("Mettre à jour (24h)", "ftUpdateTravailleurSocial_24h")
     .addItem("Mettre à jour (7j)", "ftUpdateTravailleurSocial_7j")
@@ -222,3 +376,5 @@ G.ftUpdateTravailleurSocial_31j = ftUpdateTravailleurSocial_31j;
 G.ftUpdateTravailleurSocial_30j = ftUpdateTravailleurSocial_30j;
 G.ftDebugPing = ftDebugPing;
 G.ftShowSecretsMissing = ftShowSecretsMissing;
+G.ftHealthCheckSilent = ftHealthCheckSilent;
+G.ftHealthCheck = ftHealthCheck;

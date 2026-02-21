@@ -1,7 +1,13 @@
 import { CONFIG } from "./config";
 import { ensureSecrets } from "./secrets";
-import { searchOffersPaged, getOfferPublicUrl, type OfferApi } from "./ftApi";
-import { ensureSheets, loadExistingOfferIds, appendOffersBatch, type OfferRowModel } from "./sheet";
+import { searchOffersPaged, getOfferPublicUrl } from "./ftApi";
+import {
+  ensureSheets,
+  loadExistingOfferIds,
+  appendOffersBatch,
+  appendImportRowsBatch,
+  type OfferRowModel,
+} from "./sheet";
 import { loadExclusions, isExcluded } from "./exclusions";
 
 function firstLine(text: string): string {
@@ -37,7 +43,7 @@ function computeEtpPercent(dureeTravailLibelle: string): string {
 
 function ftUpdateTravailleurSocial(days: number): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const { offres } = ensureSheets(ss);
+  const { offres, importSheet } = ensureSheets(ss);
 
   // Detect if we have UI (menu/manual run) vs time-based trigger
   const allowUi = Boolean(SpreadsheetApp.getUi);
@@ -57,6 +63,7 @@ function ftUpdateTravailleurSocial(days: number): void {
   let dedupSkipped = 0;
   let excludedSkipped = 0;
   const toInsert: OfferRowModel[] = [];
+  const importRows: { offreId: string; rawJson: string }[] = [];
 
   for (const o of fetched) {
     if (existingIds.has(o.id)) {
@@ -96,10 +103,18 @@ function ftUpdateTravailleurSocial(days: number): void {
       offreId: o.id,
     });
 
+    // Keep raw API data for traceability (only for offers actually written)
+    try {
+      importRows.push({ offreId: o.id, rawJson: JSON.stringify(o) });
+    } catch (_e) {
+      importRows.push({ offreId: o.id, rawJson: String(o) });
+    }
+
     existingIds.add(o.id);
   }
 
   appendOffersBatch(offres, toInsert);
+  appendImportRowsBatch(importSheet, importRows);
 
   const ms = Date.now() - t0;
   console.log(

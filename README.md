@@ -15,6 +15,56 @@ Les offres sont ajoutées dans une feuille **Offres** avec :
 
 > Aucun statut / suivi / enrichissement entreprise / LinkedIn : volontairement absent.
 
+## Aide (pour les utilisateurs du Google Sheet)
+
+### Mise à jour automatique (tous les jours à minuit)
+
+- La feuille est **mise à jour automatiquement chaque jour à 00:00** (heure du fichier / fuseau du script).
+- La mise à jour récupère les **offres publiées sur les dernières 24h** et les ajoute dans l’onglet **Offres**.
+- Tu peux aussi lancer la mise à jour manuellement via le menu **France Travail → Mettre à jour (24h)**.
+
+> Si tu ne vois pas la mise à jour quotidienne, vérifie que l’accès au script est autorisé (première exécution) et que les déclencheurs (triggers) ne sont pas désactivés côté Apps Script.
+
+### Secrets / accès à l’API France Travail
+
+Pour interroger l’API France Travail, le script a besoin de 2 informations :
+
+- `FT_CLIENT_ID`
+- `FT_CLIENT_SECRET`
+
+Fonctionnement :
+
+- **À l’ouverture du fichier**, si ces secrets n’existent pas encore, une fenêtre te demande de les saisir.
+- Ils sont ensuite stockés de façon sécurisée dans les **Propriétés du script (Script Properties)**.
+- Le script récupère un **token OAuth** (client_credentials) et le conserve en cache pendant ~**50 minutes**.
+
+Important :
+
+- Les secrets ne sont **pas** écrits dans la feuille.
+- Si les secrets changent, utilise **France Travail → Configurer les secrets**.
+- En cas d’erreur d’authentification (401), le script purge le cache puis réessaie une fois.
+
+### Données importées / où elles sont stockées
+
+- Les offres sont ajoutées dans l’onglet **Offres**.
+- Chaque offre est identifiée par un champ technique **`offre_id`** (colonne masquée) :
+  - c’est la **seule** base de déduplication (une offre déjà vue n’est pas réimportée).
+- Le texte long (résumé / description) est stocké en **note** sur la cellule `resume` pour garder une feuille lisible.
+
+### Exclusions (filtrer certaines offres)
+
+L’onglet **Exclusions** permet d’ignorer automatiquement certaines offres :
+
+- Col A : règles sur **intitulé**
+- Col B : règles sur **entreprise**
+
+Règles possibles :
+
+- Texte simple : match par **contains** après normalisation (trim, lowercase, sans accents, espaces normalisés)
+- Regex : format `/pattern/flags`
+
+---
+
 ## Structure
 
 ```

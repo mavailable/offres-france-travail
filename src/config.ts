@@ -7,6 +7,7 @@ export const CONFIG = {
   // Sheets
   SHEET_OFFRES: "Offres",
   SHEET_EXCLUSIONS: "Exclusions",
+  SHEET_IMPORT: "Import",
 
   // Search query (France Travail Offres v2)
   SEARCH_KEYWORDS: "travailleur social",

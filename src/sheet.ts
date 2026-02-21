@@ -9,6 +9,7 @@ function firstLine(text: string): string {
 export function ensureSheets(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): {
   offres: GoogleAppsScript.Spreadsheet.Sheet;
   exclusions: GoogleAppsScript.Spreadsheet.Sheet;
+  importSheet: GoogleAppsScript.Spreadsheet.Sheet;
   offresWasCreated: boolean;
 } {
   let offres = ss.getSheetByName(CONFIG.SHEET_OFFRES);
@@ -26,10 +27,24 @@ export function ensureSheets(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): {
     ensureExclusionsHeaders(exclusions);
   }
 
+  // Raw import (hidden)
+  let importSheet = ss.getSheetByName(CONFIG.SHEET_IMPORT);
+  if (!importSheet) {
+    importSheet = ss.insertSheet(CONFIG.SHEET_IMPORT);
+    setupImportSheet(importSheet);
+  } else {
+    ensureImportHeaders(importSheet);
+  }
+  try {
+    importSheet.hideSheet();
+  } catch (_e) {
+    // ignore (some contexts may disallow)
+  }
+
   ensureOffresHeaders(offres);
   ensureOffresFormatting(offres, offresWasCreated);
 
-  return { offres, exclusions, offresWasCreated };
+  return { offres, exclusions, importSheet, offresWasCreated };
 }
 
 function ensureOffresHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
@@ -112,6 +127,23 @@ function ensureExclusionsHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet): voi
   const same = expected.every((v, i) => (current[i] || "").trim() === v);
   if (!same) headerRange.setValues([expected]);
 
+  sheet.setFrozenRows(1);
+}
+
+function setupImportSheet(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
+  sheet.getRange(1, 1, 1, 2).setValues([["offre_id", "raw_json"]]);
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 140);
+  sheet.setColumnWidth(2, 600);
+  sheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#f1f3f4");
+}
+
+function ensureImportHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
+  const headerRange = sheet.getRange(1, 1, 1, 2);
+  const current = headerRange.getValues()[0].map(String);
+  const expected = ["offre_id", "raw_json"];
+  const same = expected.every((v, i) => (current[i] || "").trim() === v);
+  if (!same) headerRange.setValues([expected]);
   sheet.setFrozenRows(1);
 }
 
@@ -201,6 +233,17 @@ export function appendOffersBatch(
 
   // Keep consistent row height for appended rows (in case sheet had less rows formatted)
   offresSheet.setRowHeights(startRow, rows.length, CONFIG.ROW_HEIGHT_PX);
+}
+
+export function appendImportRowsBatch(
+  importSheet: GoogleAppsScript.Spreadsheet.Sheet,
+  rows: { offreId: string; rawJson: string }[]
+): void {
+  if (!rows.length) return;
+
+  const startRow = importSheet.getLastRow() + 1;
+  const values = rows.map((r) => [r.offreId, r.rawJson]);
+  importSheet.getRange(startRow, 1, rows.length, 2).setValues(values);
 }
 
 export function activateSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, name: string): void {

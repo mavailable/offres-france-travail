@@ -6,6 +6,7 @@
     // Sheets
     SHEET_OFFRES: "Offres",
     SHEET_EXCLUSIONS: "Exclusions",
+    SHEET_IMPORT: "Import",
     // Search query (France Travail Offres v2)
     SEARCH_KEYWORDS: "travailleur social",
     PUBLIEE_DEPUIS_DAYS: 1,
@@ -298,9 +299,20 @@
     } else {
       ensureExclusionsHeaders(exclusions);
     }
+    let importSheet = ss.getSheetByName(CONFIG.SHEET_IMPORT);
+    if (!importSheet) {
+      importSheet = ss.insertSheet(CONFIG.SHEET_IMPORT);
+      setupImportSheet(importSheet);
+    } else {
+      ensureImportHeaders(importSheet);
+    }
+    try {
+      importSheet.hideSheet();
+    } catch (_e) {
+    }
     ensureOffresHeaders(offres);
     ensureOffresFormatting(offres, offresWasCreated);
-    return { offres, exclusions, offresWasCreated };
+    return { offres, exclusions, importSheet, offresWasCreated };
   }
   function ensureOffresHeaders(sheet) {
     const headerRange = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, CONFIG.COLS.TOTAL);
@@ -352,6 +364,21 @@
     if (!same) headerRange.setValues([expected]);
     sheet.setFrozenRows(1);
   }
+  function setupImportSheet(sheet) {
+    sheet.getRange(1, 1, 1, 2).setValues([["offre_id", "raw_json"]]);
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 140);
+    sheet.setColumnWidth(2, 600);
+    sheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#f1f3f4");
+  }
+  function ensureImportHeaders(sheet) {
+    const headerRange = sheet.getRange(1, 1, 1, 2);
+    const current = headerRange.getValues()[0].map(String);
+    const expected = ["offre_id", "raw_json"];
+    const same = expected.every((v, i) => (current[i] || "").trim() === v);
+    if (!same) headerRange.setValues([expected]);
+    sheet.setFrozenRows(1);
+  }
   function loadExistingOfferIds(offresSheet) {
     var _a;
     const lastRow = offresSheet.getLastRow();
@@ -395,6 +422,12 @@
     const entrepriseNotes = rows.map((r) => [r.entrepriseAProposNote]);
     offresSheet.getRange(startRow, CONFIG.COLS.entrepriseAPropos, rows.length, 1).setNotes(entrepriseNotes);
     offresSheet.setRowHeights(startRow, rows.length, CONFIG.ROW_HEIGHT_PX);
+  }
+  function appendImportRowsBatch(importSheet, rows) {
+    if (!rows.length) return;
+    const startRow = importSheet.getLastRow() + 1;
+    const values = rows.map((r) => [r.offreId, r.rawJson]);
+    importSheet.getRange(startRow, 1, rows.length, 2).setValues(values);
   }
   function activateSheet(ss, name) {
     const sheet = ss.getSheetByName(name);
@@ -489,7 +522,7 @@
   }
   function ftUpdateTravailleurSocial(days) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const { offres } = ensureSheets(ss);
+    const { offres, importSheet } = ensureSheets(ss);
     const allowUi = Boolean(SpreadsheetApp.getUi);
     const secrets = ensureSecrets(allowUi);
     const existingIds = loadExistingOfferIds(offres);
@@ -502,6 +535,7 @@
     let dedupSkipped = 0;
     let excludedSkipped = 0;
     const toInsert = [];
+    const importRows = [];
     for (const o of fetched) {
       if (existingIds.has(o.id)) {
         dedupSkipped++;
@@ -535,9 +569,15 @@
         entrepriseAProposNote: entrepriseAPropos,
         offreId: o.id
       });
+      try {
+        importRows.push({ offreId: o.id, rawJson: JSON.stringify(o) });
+      } catch (_e) {
+        importRows.push({ offreId: o.id, rawJson: String(o) });
+      }
       existingIds.add(o.id);
     }
     appendOffersBatch(offres, toInsert);
+    appendImportRowsBatch(importSheet, importRows);
     const ms = Date.now() - t0;
     console.log(
       `${CONFIG.LOG_PREFIX} window=${days}d fetched=${fetched.length} dedupSkipped=${dedupSkipped} excludedSkipped=${excludedSkipped} added=${toInsert.length} in ${ms}ms`
@@ -575,6 +615,110 @@
       ScriptApp.newTrigger(handler).timeBased().atHour(0).everyDays(1).create();
     }
   }
+  function hasDailyMidnightTrigger() {
+    const handler = "ftUpdateTravailleurSocial_24h";
+    try {
+      const triggers = ScriptApp.getProjectTriggers();
+      return triggers.some(
+        (t) => t.getHandlerFunction && t.getHandlerFunction() === handler && t.getEventType && t.getEventType() === ScriptApp.EventType.CLOCK
+      );
+    } catch (_e) {
+      return false;
+    }
+  }
+  function canUseTriggers() {
+    try {
+      ScriptApp.getProjectTriggers();
+      return true;
+    } catch (_e) {
+      return false;
+    }
+  }
+  function canUseProperties() {
+    try {
+      PropertiesService.getScriptProperties().getKeys();
+      return true;
+    } catch (_e) {
+      return false;
+    }
+  }
+  function canUseCache() {
+    try {
+      const c = CacheService.getScriptCache();
+      c.put("FT_HEALTHCHECK", "1", 10);
+      c.remove("FT_HEALTHCHECK");
+      return true;
+    } catch (_e) {
+      return false;
+    }
+  }
+  function ftHealthCheckSilent() {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const issues = [];
+    try {
+      ss.getId();
+    } catch (_e) {
+      issues.push("Acc\xE8s au Spreadsheet: non autoris\xE9.");
+    }
+    if (!canUseProperties())
+      issues.push("Propri\xE9t\xE9s du script (Script Properties): non autoris\xE9.");
+    if (!canUseCache()) issues.push("CacheService: non autoris\xE9.");
+    try {
+      if (!getSecrets()) issues.push("Secrets manquants (FT_CLIENT_ID / FT_CLIENT_SECRET).");
+    } catch (_e) {
+      issues.push("Lecture des secrets: impossible (droits Script Properties).");
+    }
+    if (!canUseTriggers()) {
+      issues.push("Triggers (d\xE9clencheurs): non autoris\xE9.");
+    } else if (!hasDailyMidnightTrigger()) {
+      issues.push("D\xE9clencheur quotidien (00h) absent. Lancez France Travail \xBB Initialiser.");
+    }
+    try {
+      if (issues.length) {
+        ss.toast(
+          `Health check: ${issues.length} point(s) \xE0 corriger.
+` + issues.slice(0, 3).join("\n"),
+          "France Travail",
+          20
+        );
+      }
+    } catch (_e) {
+    }
+    if (issues.length) {
+      console.warn(`${CONFIG.LOG_PREFIX} Health check issues:
+- ${issues.join("\n- ")}`);
+    } else {
+      console.log(`${CONFIG.LOG_PREFIX} Health check OK`);
+    }
+  }
+  function ftHealthCheck() {
+    const ui = SpreadsheetApp.getUi();
+    const issues = [];
+    if (!canUseProperties()) issues.push("Propri\xE9t\xE9s du script: NON");
+    if (!canUseCache()) issues.push("CacheService: NON");
+    if (!canUseTriggers()) issues.push("Triggers: NON");
+    const secretsOk = (() => {
+      try {
+        return Boolean(getSecrets());
+      } catch (_e) {
+        return false;
+      }
+    })();
+    if (!secretsOk) issues.push("Secrets FT_CLIENT_ID / FT_CLIENT_SECRET: manquants ou illisibles");
+    const triggerOk = canUseTriggers() ? hasDailyMidnightTrigger() : false;
+    if (!triggerOk) issues.push("D\xE9clencheur quotidien 00h: absent");
+    const title = "France Travail \xBB Health check";
+    if (!issues.length) {
+      ui.alert(
+        title,
+        "Tout est OK.\n\nSecrets pr\xE9sents, droits valides, d\xE9clencheur quotidien en place.",
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+    const msg = "Points \xE0 corriger :\n\n- " + issues.join("\n- ") + "\n\nActions :\n\xBB France Travail > Initialiser (cr\xE9e le d\xE9clencheur)\n\xBB France Travail > Configurer les secrets";
+    ui.alert(title, msg, ui.ButtonSet.OK);
+  }
   function ftInit() {
     const ui = SpreadsheetApp.getUi();
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -603,9 +747,13 @@
     ensureSheets(ss);
     buildMenu();
     try {
+      ftHealthCheckSilent();
+    } catch (_e) {
+    }
+    try {
       if (!isInitialized()) {
         ss.toast(
-          "Premi\xE8re utilisation : autorisez le script.\nMenu France Travail \u2192 Initialiser / Autoriser",
+          "Premi\xE8re utilisation : autorisez le script.\nMenu France Travail \xBB Initialiser / Autoriser",
           "France Travail",
           20
         );
@@ -615,7 +763,7 @@
     try {
       if (!getSecrets()) {
         ss.toast(
-          "Secrets France Travail manquants.\nMenu France Travail \u2192 Configurer les secrets.",
+          "Secrets France Travail manquants.\nMenu France Travail \xBB Configurer les secrets.",
           "France Travail",
           20
         );
@@ -626,7 +774,7 @@
   }
   function buildMenu() {
     const ui = SpreadsheetApp.getUi();
-    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addSeparator().addItem("Aide / README", "ftHelp").addToUi();
+    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addSeparator().addItem("Aide / README", "ftHelp").addToUi();
   }
   function ftShowSecretsMissing() {
     const ui = SpreadsheetApp.getUi();
@@ -686,3 +834,5 @@ Secrets
   G.ftUpdateTravailleurSocial_30j = ftUpdateTravailleurSocial_30j;
   G.ftDebugPing = ftDebugPing;
   G.ftShowSecretsMissing = ftShowSecretsMissing;
+  G.ftHealthCheckSilent = ftHealthCheckSilent;
+  G.ftHealthCheck = ftHealthCheck;
