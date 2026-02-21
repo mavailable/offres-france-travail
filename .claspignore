@@ -1,0 +1,12 @@
+**/node_modules/**
+**/.git/**
+src/**
+tsconfig.json
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+README.md
+
+# Ignore old per-file JS outputs; we deploy dist/code.js instead
+dist/*.js
+!dist/code.js
