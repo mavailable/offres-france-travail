@@ -1,1 +1,33 @@
-node_modules
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+/dist/
+*.tsbuildinfo
+
+# clasp (souvent contient des scriptId / config locale)
+.clasp.json
+.clasp.dev.json
+.clasp.prod.json
+
+# Logs
+logs/
+*.log
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Env files
+.env
+.env.*
+
+# Coverage / temp
+coverage/
+.tmp/
+tmp/
