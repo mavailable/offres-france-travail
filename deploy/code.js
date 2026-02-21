@@ -668,11 +668,6 @@
     } catch (_e) {
       issues.push("Lecture des secrets: impossible (droits Script Properties).");
     }
-    if (!canUseTriggers()) {
-      issues.push("Triggers (d\xE9clencheurs): non autoris\xE9.");
-    } else if (!hasDailyMidnightTrigger()) {
-      issues.push("D\xE9clencheur quotidien (00h) absent. Lancez France Travail \xBB Initialiser.");
-    }
     try {
       if (issues.length) {
         ss.toast(
@@ -774,7 +769,7 @@
   }
   function buildMenu() {
     const ui = SpreadsheetApp.getUi();
-    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addSeparator().addItem("Aide / README", "ftHelp").addToUi();
+    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addToUi();
   }
   function ftShowSecretsMissing() {
     const ui = SpreadsheetApp.getUi();
@@ -796,21 +791,6 @@
     ensureSheets(ss);
     activateSheet(ss, CONFIG.SHEET_EXCLUSIONS);
   }
-  function ftHelp() {
-    const msg = `Outil France Travail (Offres v2)
-
-\u2022 Menu > France Travail > Mettre \xE0 jour (24h) : importe les offres publi\xE9es depuis 1 jour pour la recherche "travailleur social".
-\u2022 D\xE9duplication : bas\xE9e sur l'ID offre stock\xE9 en colonne masqu\xE9e (offre_id).
-\u2022 Exclusions : onglet Exclusions (col A = r\xE8gles intitul\xE9, col B = r\xE8gles entreprise).
-  - Texte simple = match 'contains' apr\xE8s normalisation (minuscule, sans accents).
-  - Regex = /pattern/flags.
-
-Secrets
-\u2022 FT_CLIENT_ID / FT_CLIENT_SECRET sont stock\xE9s dans Script Properties.
-\u2022 Le token OAuth est mis en cache ~50 minutes.
-`;
-    SpreadsheetApp.getUi().alert(msg);
-  }
   function ftDebugPing() {
     const ts = (/* @__PURE__ */ new Date()).toISOString();
     PropertiesService.getScriptProperties().setProperty("FT_DEBUG_PING", ts);
@@ -827,7 +807,6 @@ Secrets
   G.ftInit = ftInit;
   G.ftConfigureSecrets = ftConfigureSecrets;
   G.ftOpenExclusions = ftOpenExclusions;
-  G.ftHelp = ftHelp;
   G.ftUpdateTravailleurSocial_24h = ftUpdateTravailleurSocial_24h;
   G.ftUpdateTravailleurSocial_7j = ftUpdateTravailleurSocial_7j;
   G.ftUpdateTravailleurSocial_31j = ftUpdateTravailleurSocial_31j;

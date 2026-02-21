@@ -110,11 +110,10 @@ export function ftHealthCheckSilent(): void {
   }
 
   // Trigger daily
-  if (!canUseTriggers()) {
-    issues.push("Triggers (déclencheurs): non autorisé.");
-  } else if (!hasDailyMidnightTrigger()) {
-    issues.push("Déclencheur quotidien (00h) absent. Lancez France Travail » Initialiser.");
-  }
+  // NOTE: OnOpen runs in a restricted/variable context where reading project triggers
+  // can be flaky or require extra authorization. To avoid false alarms at each open,
+  // we do NOT check trigger presence in the silent health check.
+  // Use the menu: France Travail » Health check, or France Travail » Initialiser.
 
   // Report as toast (non-blocking)
   try {
@@ -281,8 +280,6 @@ export function buildMenu(): void {
     .addSeparator()
     .addItem("Configurer les secrets", "ftConfigureSecrets")
     .addItem("Ouvrir l’onglet Exclusions", "ftOpenExclusions")
-    .addSeparator()
-    .addItem("Aide / README", "ftHelp")
     .addToUi();
 }
 
@@ -311,20 +308,6 @@ export function ftOpenExclusions(): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureSheets(ss);
   activateSheet(ss, CONFIG.SHEET_EXCLUSIONS);
-}
-
-export function ftHelp(): void {
-  const msg =
-    "Outil France Travail (Offres v2)\n\n" +
-    "• Menu > France Travail > Mettre à jour (24h) : importe les offres publiées depuis 1 jour pour la recherche \"travailleur social\".\n" +
-    "• Déduplication : basée sur l'ID offre stocké en colonne masquée (offre_id).\n" +
-    "• Exclusions : onglet Exclusions (col A = règles intitulé, col B = règles entreprise).\n" +
-    "  - Texte simple = match 'contains' après normalisation (minuscule, sans accents).\n" +
-    "  - Regex = /pattern/flags.\n\n" +
-    "Secrets\n" +
-    "• FT_CLIENT_ID / FT_CLIENT_SECRET sont stockés dans Script Properties.\n" +
-    "• Le token OAuth est mis en cache ~50 minutes.\n";
-  SpreadsheetApp.getUi().alert(msg);
 }
 
 /**
@@ -369,7 +352,6 @@ G.buildMenu = buildMenu;
 G.ftInit = ftInit;
 G.ftConfigureSecrets = ftConfigureSecrets;
 G.ftOpenExclusions = ftOpenExclusions;
-G.ftHelp = ftHelp;
 G.ftUpdateTravailleurSocial_24h = ftUpdateTravailleurSocial_24h;
 G.ftUpdateTravailleurSocial_7j = ftUpdateTravailleurSocial_7j;
 G.ftUpdateTravailleurSocial_31j = ftUpdateTravailleurSocial_31j;
