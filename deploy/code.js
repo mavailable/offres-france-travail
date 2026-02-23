@@ -107,10 +107,14 @@
       true
     );
   }
-  function promptAndStoreSecrets() {
-    const ui = SpreadsheetApp.getUi();
-    const helpLink = "https://francetravail.io/compte/applications/";
-    const title = "Configuration France Travail";
+  function canUseHtmlDialog() {
+    try {
+      return Boolean(HtmlService && SpreadsheetApp && SpreadsheetApp.getUi);
+    } catch (_e) {
+      return false;
+    }
+  }
+  function promptBlockingSecrets(ui, title, helpLink) {
     const r1 = ui.prompt(
       title,
       "Mes secrets France Travail\n" + helpLink + "\n\nSaisir FT_CLIENT_ID (client_id):",
@@ -134,6 +138,177 @@
     const secrets = { clientId, clientSecret };
     setSecrets(secrets);
     return secrets;
+  }
+  function promptAndStoreSecrets() {
+    const ui = SpreadsheetApp.getUi();
+    const helpLink = "https://francetravail.io/compte/applications/";
+    const title = "Configuration France Travail";
+    if (canUseHtmlDialog()) {
+      const html = HtmlService.createHtmlOutput(
+        `<!doctype html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root{
+        --bg:#ffffff;
+        --text:#111827;
+        --muted:#6b7280;
+        --border:#e5e7eb;
+        --ring:#93c5fd;
+        --primary:#2563eb;
+        --primary-hover:#1d4ed8;
+      }
+      *{box-sizing:border-box;}
+      body{
+        margin:0;
+        background:var(--bg);
+        color:var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
+      .wrap{padding:14px 14px 10px;}
+      .card{
+        border:1px solid var(--border);
+        border-radius:12px;
+        padding:12px 12px 10px;
+        background:#fff;
+      }
+      .head{display:flex;gap:12px;align-items:flex-start;}
+      .badge{
+        width:36px;height:36px;flex:0 0 36px;
+        border-radius:10px;
+        background:rgba(37,99,235,.12);
+        display:flex;align-items:center;justify-content:center;
+        color:var(--primary);
+        font-weight:700;
+      }
+      h2{margin:0;font-size:15px;line-height:1.3;}
+      .sub{margin:4px 0 0 0;font-size:12px;color:var(--muted);}
+      a{color:var(--primary);text-decoration:none;}
+      a:hover{text-decoration:underline;}
+      .grid{margin-top:10px;display:grid;gap:10px;}
+      label{display:block;font-size:12px;color:#374151;margin-bottom:6px;}
+      input{
+        width:100%;
+        padding:10px 10px;
+        font-size:13px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        outline:none;
+      }
+      input:focus{
+        border-color:var(--ring);
+        box-shadow:0 0 0 3px rgba(147,197,253,.55);
+      }
+      .row{
+        margin-top:10px;
+        display:flex;
+        gap:10px;
+        justify-content:flex-end;
+        align-items:center;
+      }
+      .btn{
+        border-radius:10px;
+        padding:9px 12px;
+        font-size:13px;
+        border:1px solid var(--border);
+        background:#fff;
+        cursor:pointer;
+      }
+      .btn:hover{background:#f9fafb;}
+      .btn-primary{
+        border-color:transparent;
+        background:var(--primary);
+        color:#fff;
+        font-weight:600;
+      }
+      .btn-primary:hover{background:var(--primary-hover);}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="head">
+          <div class="badge">FT</div>
+          <div>
+            <h2>Renseigner les secrets France Travail</h2>
+            <p class="sub">
+              Les secrets restent stock\xE9s dans les <b>Script Properties</b> de ce Google Sheet.
+              <br />
+              Lien : <a href="${helpLink}" target="_blank" rel="noreferrer">${helpLink}</a>
+            </p>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="clientId">FT_CLIENT_ID <span class="sub">(client_id)</span></label>
+            <input id="clientId" type="text" autocomplete="off" spellcheck="false" placeholder="ex: 12345678-aaaa-bbbb-cccc-1234567890ab" />
+          </div>
+
+          <div>
+            <label for="clientSecret">FT_CLIENT_SECRET <span class="sub">(client_secret)</span></label>
+            <input id="clientSecret" type="password" autocomplete="off" spellcheck="false" placeholder="ex: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+          </div>
+        </div>
+
+        <div class="row">
+          <button class="btn" onclick="google.script.host.close()">Annuler</button>
+          <button id="saveBtn" class="btn btn-primary" onclick="submitSecrets()">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function submitSecrets(){
+        const clientId = (document.getElementById('clientId').value || '').trim();
+        const clientSecret = (document.getElementById('clientSecret').value || '').trim();
+        if(!clientId){
+          alert('FT_CLIENT_ID est vide.');
+          return;
+        }
+        if(!clientSecret){
+          alert('FT_CLIENT_SECRET est vide.');
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(() => google.script.host.close())
+          .withFailureHandler(err => alert((err && err.message) ? err.message : String(err)))
+          .ftSetSecretsFromDialogAndFinalizeInit({ clientId, clientSecret });
+      }
+
+      function onKeyDown(e){
+        if(e && e.key === 'Enter'){
+          e.preventDefault();
+          submitSecrets();
+        }
+      }
+      document.getElementById('clientId').addEventListener('keydown', onKeyDown);
+      document.getElementById('clientSecret').addEventListener('keydown', onKeyDown);
+      document.getElementById('saveBtn').focus();
+    </script>
+  </body>
+</html>`
+      ).setWidth(560).setHeight(320);
+      ui.showModalDialog(html, title);
+      const stored = getSecrets();
+      if (!stored) {
+        throw new Error(
+          "Fen\xEAtre ouverte. Renseignez FT_CLIENT_ID et FT_CLIENT_SECRET puis cliquez sur Enregistrer."
+        );
+      }
+      return stored;
+    }
+    return promptBlockingSecrets(ui, title, helpLink);
+  }
+  function ftSetSecretsFromDialog(secrets) {
+    const clientId = ((secrets == null ? void 0 : secrets.clientId) || "").trim();
+    const clientSecret = ((secrets == null ? void 0 : secrets.clientSecret) || "").trim();
+    if (!clientId) throw new Error("FT_CLIENT_ID est vide.");
+    if (!clientSecret) throw new Error("FT_CLIENT_SECRET est vide.");
+    setSecrets({ clientId, clientSecret });
   }
   function ensureSecrets(allowUi) {
     const existing = getSecrets();
@@ -652,6 +827,68 @@
       return false;
     }
   }
+  function runHealthChecks(opts) {
+    const helpSecretsUrl = "https://francetravail.io/compte/applications/";
+    const items = [];
+    items.push({
+      key: "properties",
+      label: "Propri\xE9t\xE9s du script",
+      ok: canUseProperties()
+    });
+    items.push({ key: "cache", label: "CacheService", ok: canUseCache() });
+    const secretsOk = (() => {
+      try {
+        return Boolean(getSecrets());
+      } catch (_e) {
+        return false;
+      }
+    })();
+    items.push({
+      key: "secrets",
+      label: "Secrets FT_CLIENT_ID / FT_CLIENT_SECRET",
+      ok: secretsOk,
+      help: [
+        {
+          label: "Configurer les secrets",
+          hint: "France Travail > Configurer les secrets",
+          action: "secrets"
+        },
+        { label: "Cr\xE9er/voir l'application", href: helpSecretsUrl }
+      ]
+    });
+    if (opts.includeTriggerCheck) {
+      const triggersAccessible = canUseTriggers();
+      if (!triggersAccessible) {
+        items.push({
+          key: "dailyTrigger",
+          label: "D\xE9clencheur quotidien 00h (acc\xE8s triggers non autoris\xE9)",
+          ok: false,
+          help: [
+            {
+              label: "Initialiser",
+              hint: "France Travail > Initialiser",
+              action: "init"
+            }
+          ]
+        });
+      } else {
+        const hasDaily = hasDailyMidnightTrigger();
+        items.push({
+          key: "dailyTrigger",
+          label: hasDaily ? "D\xE9clencheur quotidien 00h" : "D\xE9clencheur quotidien 00h (absent)",
+          ok: hasDaily,
+          help: [
+            {
+              label: "Initialiser",
+              hint: "France Travail > Initialiser",
+              action: "init"
+            }
+          ]
+        });
+      }
+    }
+    return { items, helpSecretsUrl };
+  }
   function ftHealthCheckSilent() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const issues = [];
@@ -660,13 +897,12 @@
     } catch (_e) {
       issues.push("Acc\xE8s au Spreadsheet: non autoris\xE9.");
     }
-    if (!canUseProperties())
-      issues.push("Propri\xE9t\xE9s du script (Script Properties): non autoris\xE9.");
-    if (!canUseCache()) issues.push("CacheService: non autoris\xE9.");
-    try {
-      if (!getSecrets()) issues.push("Secrets manquants (FT_CLIENT_ID / FT_CLIENT_SECRET).");
-    } catch (_e) {
-      issues.push("Lecture des secrets: impossible (droits Script Properties).");
+    const { items } = runHealthChecks({ includeTriggerCheck: false });
+    for (const it of items) {
+      if (it.ok) continue;
+      if (it.key === "properties") issues.push("Propri\xE9t\xE9s du script (Script Properties): non autoris\xE9.");
+      else if (it.key === "cache") issues.push("CacheService: non autoris\xE9.");
+      else if (it.key === "secrets") issues.push("Secrets manquants (FT_CLIENT_ID / FT_CLIENT_SECRET).");
     }
     try {
       if (issues.length) {
@@ -688,30 +924,110 @@
   }
   function ftHealthCheck() {
     const ui = SpreadsheetApp.getUi();
-    const issues = [];
-    if (!canUseProperties()) issues.push("Propri\xE9t\xE9s du script: NON");
-    if (!canUseCache()) issues.push("CacheService: NON");
-    if (!canUseTriggers()) issues.push("Triggers: NON");
-    const secretsOk = (() => {
-      try {
-        return Boolean(getSecrets());
-      } catch (_e) {
-        return false;
-      }
-    })();
-    if (!secretsOk) issues.push("Secrets FT_CLIENT_ID / FT_CLIENT_SECRET: manquants ou illisibles");
-    const triggerOk = canUseTriggers() ? hasDailyMidnightTrigger() : false;
-    if (!triggerOk) issues.push("D\xE9clencheur quotidien 00h: absent");
+    const { items, helpSecretsUrl } = runHealthChecks({ includeTriggerCheck: true });
     const title = "France Travail \xBB Health check";
-    if (!issues.length) {
+    const allOk = items.every((i) => i.ok);
+    if (allOk) {
       ui.alert(
         title,
-        "Tout est OK.\n\nSecrets pr\xE9sents, droits valides, d\xE9clencheur quotidien en place.",
+        "\u2705 Tout est OK.\n\nSecrets pr\xE9sents, droits valides et d\xE9clencheur quotidien en place.",
         ui.ButtonSet.OK
       );
       return;
     }
-    const msg = "Points \xE0 corriger :\n\n- " + issues.join("\n- ") + "\n\nActions :\n\xBB France Travail > Initialiser (cr\xE9e le d\xE9clencheur)\n\xBB France Travail > Configurer les secrets";
+    const canUseHtml = (() => {
+      try {
+        return Boolean(HtmlService && SpreadsheetApp && SpreadsheetApp.getUi);
+      } catch (_e) {
+        return false;
+      }
+    })();
+    if (canUseHtml) {
+      const lines = items.map((i) => {
+        var _a;
+        const icon = i.ok ? "\u2705" : "\u274C";
+        const help = !i.ok && ((_a = i.help) == null ? void 0 : _a.length) ? `<div class="help">${i.help.map((h) => {
+          if (h.action === "init") {
+            return `<button class="linklike" onclick="runInit()">${h.label}</button>`;
+          }
+          if (h.action === "secrets") {
+            return `<button class="linklike" onclick="runSecrets()">${h.label}</button>`;
+          }
+          if (h.href) {
+            return `<a href="${h.href}" target="_blank" rel="noreferrer">${h.label}</a>`;
+          }
+          return `<span class="hint">${h.label} : <b>${h.hint || ""}</b></span>`;
+        }).join(" \xB7 ")}</div>` : "";
+        return `<div class="row"><div class="left">${icon}</div><div class="right"><div class="label">${i.label}</div>${help}</div></div>`;
+      }).join("\n");
+      const html = HtmlService.createHtmlOutput(`<!doctype html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root{--text:#111827;--muted:#6b7280;--border:#e5e7eb;--bg:#ffffff;--primary:#2563eb;}
+      *{box-sizing:border-box;}
+      body{margin:0;background:var(--bg);color:var(--text);font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
+      .wrap{padding:14px;}
+      .card{border:1px solid var(--border);border-radius:12px;background:#fff;padding:12px;}
+      h2{margin:0 0 8px 0;font-size:15px;}
+      .row{display:flex;gap:10px;padding:10px 8px;border:1px solid var(--border);border-radius:10px;align-items:flex-start;margin-top:8px;}
+      .left{width:22px;flex:0 0 22px;line-height:1.2;font-size:16px;}
+      .label{font-size:13px;font-weight:600;}
+      .help{margin-top:4px;font-size:12px;color:var(--muted);}
+      a{color:var(--primary);text-decoration:none;}
+      a:hover{text-decoration:underline;}
+      .hint b{color:#111827;}
+      .linklike{border:0;background:transparent;color:var(--primary);padding:0;margin:0;font:inherit;cursor:pointer;}
+      .linklike:hover{text-decoration:underline;}
+      .actions{margin-top:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
+      .btn{border-radius:10px;padding:9px 12px;font-size:13px;border:1px solid var(--border);background:#fff;cursor:pointer;}
+      .btn-primary{border-color:transparent;background:var(--primary);color:#fff;font-weight:600;}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h2>Health check</h2>
+        ${lines}
+        <div class="actions">
+          <div style="font-size:12px;color:var(--muted);">Lien secrets: <a href="${helpSecretsUrl}" target="_blank" rel="noreferrer">${helpSecretsUrl}</a></div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn" onclick="google.script.host.close()">Fermer</button>
+            <button class="btn btn-primary" onclick="runInit()">Initialiser</button>
+            <button class="btn btn-primary" onclick="runSecrets()">Configurer les secrets</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function runInit(){
+        google.script.run
+          .withSuccessHandler(() => google.script.host.close())
+          .withFailureHandler(err => alert((err && err.message) ? err.message : String(err)))
+          .ftInit();
+      }
+      function runSecrets(){
+        google.script.run
+          .withSuccessHandler(() => google.script.host.close())
+          .withFailureHandler(err => alert((err && err.message) ? err.message : String(err)))
+          .ftConfigureSecrets();
+      }
+    </script>
+  </body>
+</html>`).setWidth(620).setHeight(420);
+      ui.showModalDialog(html, title);
+      return;
+    }
+    const msg = items.map((i) => `${i.ok ? "\u2705" : "\u274C"} ${i.label}`).join("\n") + `
+
+Corrections :
+\xBB France Travail > Initialiser
+\xBB France Travail > Configurer les secrets
+\xBB Lien secrets: ${helpSecretsUrl}`;
     ui.alert(title, msg, ui.ButtonSet.OK);
   }
   function ftInit() {
@@ -719,15 +1035,45 @@
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     ensureSheets(ss);
     if (!getSecrets()) {
-      promptAndStoreSecrets();
+      try {
+        promptAndStoreSecrets();
+      } catch (_e) {
+      }
+      try {
+        ss.toast(
+          "Renseignez FT_CLIENT_ID et FT_CLIENT_SECRET puis cliquez sur \xAB Enregistrer \xBB.\n\nL\u2019initialisation se terminera automatiquement.",
+          "France Travail",
+          20
+        );
+      } catch (_e) {
+        ui.alert(
+          "France Travail",
+          "Renseignez FT_CLIENT_ID et FT_CLIENT_SECRET puis cliquez sur \xAB Enregistrer \xBB.\n\nL\u2019initialisation se terminera automatiquement.",
+          ui.ButtonSet.OK
+        );
+      }
+      return;
     }
-    ensureDailyMidnightTrigger();
-    PropertiesService.getScriptProperties().setProperty(INIT_PROP_KEY, "1");
+    finalizeInit();
     ui.alert(
       "France Travail",
       "Initialisation OK.\n\nLe d\xE9clencheur quotidien (00h) est en place.",
       ui.ButtonSet.OK
     );
+  }
+  function finalizeInit() {
+    ensureDailyMidnightTrigger();
+    PropertiesService.getScriptProperties().setProperty(INIT_PROP_KEY, "1");
+  }
+  function ftSetSecretsFromDialogAndFinalizeInit(secrets) {
+    ftSetSecretsFromDialog(secrets);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ensureSheets(ss);
+    finalizeInit();
+    try {
+      ss.toast("Secrets enregistr\xE9s. Initialisation termin\xE9e.", "France Travail", 8);
+    } catch (_e) {
+    }
   }
   function onOpen() {
     try {
@@ -755,17 +1101,6 @@
       }
     } catch (_e) {
     }
-    try {
-      if (!getSecrets()) {
-        ss.toast(
-          "Secrets France Travail manquants.\nMenu France Travail \xBB Configurer les secrets.",
-          "France Travail",
-          20
-        );
-        ftShowSecretsMissing();
-      }
-    } catch (e) {
-    }
   }
   function buildMenu() {
     const ui = SpreadsheetApp.getUi();
@@ -784,7 +1119,12 @@
   }
   function ftConfigureSecrets() {
     promptAndStoreSecrets();
-    SpreadsheetApp.getUi().alert("Secrets enregistr\xE9s dans Script Properties.");
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    try {
+      ss.toast("Secrets enregistr\xE9s dans Script Properties.", "France Travail", 8);
+    } catch (_e) {
+      SpreadsheetApp.getUi().alert("Secrets enregistr\xE9s dans Script Properties.");
+    }
   }
   function ftOpenExclusions() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -815,3 +1155,5 @@
   G.ftShowSecretsMissing = ftShowSecretsMissing;
   G.ftHealthCheckSilent = ftHealthCheckSilent;
   G.ftHealthCheck = ftHealthCheck;
+  G.ftSetSecretsFromDialog = ftSetSecretsFromDialog;
+  G.ftSetSecretsFromDialogAndFinalizeInit = ftSetSecretsFromDialogAndFinalizeInit;
