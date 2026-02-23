@@ -943,6 +943,14 @@
       }
     })();
     if (canUseHtml) {
+      const hasInitIssue = items.some((i) => {
+        var _a;
+        return !i.ok && ((_a = i.help) == null ? void 0 : _a.some((h) => h.action === "init"));
+      });
+      const hasSecretsIssue = items.some((i) => {
+        var _a;
+        return !i.ok && ((_a = i.help) == null ? void 0 : _a.some((h) => h.action === "secrets"));
+      });
       const lines = items.map((i) => {
         var _a;
         const icon = i.ok ? "\u2705" : "\u274C";
@@ -982,7 +990,7 @@
       .hint b{color:#111827;}
       .linklike{border:0;background:transparent;color:var(--primary);padding:0;margin:0;font:inherit;cursor:pointer;}
       .linklike:hover{text-decoration:underline;}
-      .actions{margin-top:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;}
+      .actions{margin-top:12px;display:flex;justify-content:flex-end;gap:10px;align-items:center;}
       .btn{border-radius:10px;padding:9px 12px;font-size:13px;border:1px solid var(--border);background:#fff;cursor:pointer;}
       .btn-primary{border-color:transparent;background:var(--primary);color:#fff;font-weight:600;}
     </style>
@@ -993,12 +1001,9 @@
         <h2>Health check</h2>
         ${lines}
         <div class="actions">
-          <div style="font-size:12px;color:var(--muted);">Lien secrets: <a href="${helpSecretsUrl}" target="_blank" rel="noreferrer">${helpSecretsUrl}</a></div>
-          <div style="display:flex;gap:10px;">
-            <button class="btn" onclick="google.script.host.close()">Fermer</button>
-            <button class="btn btn-primary" onclick="runInit()">Initialiser</button>
-            <button class="btn btn-primary" onclick="runSecrets()">Configurer les secrets</button>
-          </div>
+          <button class="btn" onclick="google.script.host.close()">Fermer</button>
+          ${hasInitIssue ? '<button class="btn btn-primary" onclick="runInit()">Initialiser</button>' : ""}
+          ${hasSecretsIssue ? '<button class="btn btn-primary" onclick="runSecrets()">Configurer les secrets</button>' : ""}
         </div>
       </div>
     </div>
