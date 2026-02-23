@@ -10,6 +10,9 @@ export interface ExclusionRule {
 export interface Exclusions {
   intituleRules: ExclusionRule[];
   entrepriseRules: ExclusionRule[];
+  descriptionRules: ExclusionRule[];
+  rawRules: ExclusionRule[];
+  contratRules: ExclusionRule[];
 }
 
 export function normalizeText(input: string): string {
@@ -51,25 +54,53 @@ export function loadExclusions(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): Ex
   const sheet = ss.getSheetByName(CONFIG.SHEET_EXCLUSIONS);
   if (!sheet) {
     // Should have been ensured by sheet.ts, but keep robust.
-    return { intituleRules: [], entrepriseRules: [] };
+    return {
+      intituleRules: [],
+      entrepriseRules: [],
+      descriptionRules: [],
+      rawRules: [],
+      contratRules: [],
+    };
   }
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { intituleRules: [], entrepriseRules: [] };
+  if (lastRow < 2)
+    return {
+      intituleRules: [],
+      entrepriseRules: [],
+      descriptionRules: [],
+      rawRules: [],
+      contratRules: [],
+    };
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 2).getValues() as unknown[][];
+  // Read up to 5 columns (older sheets may have only 2 columns; Apps Script fills missing with "")
+  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues() as unknown[][];
   const intituleRules: ExclusionRule[] = [];
   const entrepriseRules: ExclusionRule[] = [];
+  const descriptionRules: ExclusionRule[] = [];
+  const rawRules: ExclusionRule[] = [];
+  const contratRules: ExclusionRule[] = [];
 
   for (const row of values) {
     const a = String(row[0] ?? "").trim();
     const b = String(row[1] ?? "").trim();
+    const c = String(row[2] ?? "").trim();
+    const d = String(row[3] ?? "").trim();
+    const e = String(row[4] ?? "").trim();
+
     const ra = parseRule(a);
     const rb = parseRule(b);
+    const rc = parseRule(c);
+    const rd = parseRule(d);
+    const re = parseRule(e);
+
     if (ra) intituleRules.push(ra);
     if (rb) entrepriseRules.push(rb);
+    if (rc) descriptionRules.push(rc);
+    if (rd) rawRules.push(rd);
+    if (re) contratRules.push(re);
   }
 
-  return { intituleRules, entrepriseRules };
+  return { intituleRules, entrepriseRules, descriptionRules, rawRules, contratRules };
 }
 
 export function matchesAnyRule(text: string, rules: ExclusionRule[]): boolean {
@@ -87,13 +118,25 @@ export function matchesAnyRule(text: string, rules: ExclusionRule[]): boolean {
 }
 
 export function isExcluded(
-  offer: { intitule: string; entrepriseNom: string },
+  offer: {
+    intitule: string;
+    entrepriseNom: string;
+    description?: string;
+    raw?: string;
+    typeContratLibelle?: string;
+  },
   exclusions: Exclusions
 ): boolean {
   const title = offer.intitule || "";
   const company = offer.entrepriseNom || "";
+  const description = offer.description || "";
+  const raw = offer.raw || "";
+  const contrat = offer.typeContratLibelle || "";
 
   if (matchesAnyRule(title, exclusions.intituleRules)) return true;
   if (matchesAnyRule(company, exclusions.entrepriseRules)) return true;
+  if (matchesAnyRule(description, exclusions.descriptionRules)) return true;
+  if (matchesAnyRule(raw, exclusions.rawRules)) return true;
+  if (matchesAnyRule(contrat, exclusions.contratRules)) return true;
   return false;
 }

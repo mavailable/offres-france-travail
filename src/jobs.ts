@@ -74,6 +74,16 @@ function ftUpdateTravailleurSocial(days: number): void {
     const candidate = {
       intitule: o.intitule || "",
       entrepriseNom: o.entrepriseNom || "",
+      description: o.description || "",
+      typeContratLibelle: o.typeContratLibelle || "",
+      // Raw payload is used only for filtering; catch stringify issues.
+      raw: (() => {
+        try {
+          return JSON.stringify(o);
+        } catch (_e) {
+          return String(o);
+        }
+      })(),
     };
     if (isExcluded(candidate, exclusions)) {
       excludedSkipped++;

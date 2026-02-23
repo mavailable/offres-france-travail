@@ -112,22 +112,41 @@ function ensureOffresFormatting(
 }
 
 function setupExclusionsSheet(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
-  sheet.getRange(1, 1, 1, 2).setValues([HEADERS_EXCLUSIONS]);
+  sheet.getRange(1, 1, 1, HEADERS_EXCLUSIONS.length).setValues([HEADERS_EXCLUSIONS]);
   sheet.setFrozenRows(1);
-  sheet.setColumnWidth(1, 360);
-  sheet.setColumnWidth(2, 360);
-  sheet.getRange(1, 1, 1, 2).setFontWeight("bold").setBackground("#f1f3f4");
+
+  // Reasonable widths for rule columns
+  for (let i = 1; i <= HEADERS_EXCLUSIONS.length; i++) {
+    sheet.setColumnWidth(i, 320);
+  }
+
+  sheet
+    .getRange(1, 1, 1, HEADERS_EXCLUSIONS.length)
+    .setFontWeight("bold")
+    .setBackground("#f1f3f4");
 }
 
 function ensureExclusionsHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {
-  const headerRange = sheet.getRange(1, 1, 1, 2);
-  const current = headerRange.getValues()[0].map(String);
   const expected = HEADERS_EXCLUSIONS;
+  const headerRange = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, expected.length);
+  const current = headerRange.getValues()[0].map(String);
 
-  const same = expected.every((v, i) => (current[i] || "").trim() === v);
-  if (!same) headerRange.setValues([expected]);
+  const same =
+    current.length === expected.length &&
+    expected.every((v, i) => (current[i] || "").trim() === v);
+
+  if (!same) {
+    headerRange.setValues([expected]);
+  }
 
   sheet.setFrozenRows(1);
+
+  // Ensure widths
+  for (let i = 1; i <= expected.length; i++) {
+    sheet.setColumnWidth(i, 320);
+  }
+
+  headerRange.setFontWeight("bold").setBackground("#f1f3f4");
 }
 
 function setupImportSheet(sheet: GoogleAppsScript.Spreadsheet.Sheet): void {

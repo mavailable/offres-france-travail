@@ -15,13 +15,11 @@ export function getSecrets(): FtSecrets | null {
 
 export function setSecrets(secrets: FtSecrets): void {
   const props = PropertiesService.getScriptProperties();
-  props.setProperties(
-    {
-      [CONFIG.SECRETS.CLIENT_ID]: secrets.clientId.trim(),
-      [CONFIG.SECRETS.CLIENT_SECRET]: secrets.clientSecret.trim(),
-    },
-    true
-  );
+  // IMPORTANT: do NOT delete other script properties (OpenAI config, init markers, etc.)
+  props.setProperties({
+    [CONFIG.SECRETS.CLIENT_ID]: secrets.clientId.trim(),
+    [CONFIG.SECRETS.CLIENT_SECRET]: secrets.clientSecret.trim(),
+  });
 }
 
 /**

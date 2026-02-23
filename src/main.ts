@@ -7,6 +7,9 @@ import {
   ftUpdateTravailleurSocial_30j,
 } from "./jobs";
 import { activateSheet, ensureSheets } from "./sheet";
+import { promptAndStoreAiConfig } from "./aiConfig";
+import { AI_SHEETS, ensureAiSheets, activateAiSheet } from "./aiSheets";
+import { runJob, runAllEnabledJobs } from "./aiRunner";
 
 const INIT_PROP_KEY = "FT_INIT_DONE";
 
@@ -230,6 +233,13 @@ export function onOpen(): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureSheets(ss);
 
+  // Ensure AI sheets exist early (cheap) so menu actions don't fail.
+  try {
+    ensureAiSheets(ss);
+  } catch (_e) {
+    // ignore
+  }
+
   buildMenu();
 
   // Silent health check (non-blocking, no prompts)
@@ -281,6 +291,22 @@ export function buildMenu(): void {
     .addItem("Configurer les secrets", "ftConfigureSecrets")
     .addItem("Ouvrir l’onglet Exclusions", "ftOpenExclusions")
     .addToUi();
+
+  // Agents menu
+  ui.createMenu("Agents")
+    .addItem("Configurer (OpenAI)", "ftAgentsConfigure")
+    .addSeparator()
+    .addItem("Run completion", "ftAgentsRunCompletion")
+    .addItem("Run score", "ftAgentsRunScore")
+    .addItem("Run commercial score", "ftAgentsRunCommercialScore")
+    .addItem("Run keywords (negative)", "ftAgentsRunKeywords")
+    .addSeparator()
+    .addItem("Run all enabled jobs", "ftAgentsRunAllEnabled")
+    .addSeparator()
+    .addItem("Ouvrir Config (Agents)", "ftAgentsOpenConfig")
+    .addItem("Ouvrir Jobs", "ftAgentsOpenJobs")
+    .addItem("Ouvrir Logs", "ftAgentsOpenLogs")
+    .addToUi();
 }
 
 /**
@@ -306,8 +332,60 @@ export function ftConfigureSecrets(): void {
 
 export function ftOpenExclusions(): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Ensure sheet exists and headers (including new columns) are created/updated
   ensureSheets(ss);
   activateSheet(ss, CONFIG.SHEET_EXCLUSIONS);
+}
+
+// --- Agents / IA ---
+
+export function ftAgentsConfigure(): void {
+  promptAndStoreAiConfig();
+  SpreadsheetApp.getUi().alert(
+    "Agents",
+    "Configuration OpenAI enregistrée dans Script Properties.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+export function ftAgentsOpenConfig(): void {
+  SpreadsheetApp.getUi().alert(
+    "Agents",
+    "La config Agents (OpenAI) est stockée dans Script Properties.\n\nMenu: Agents > Configurer (OpenAI)",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+export function ftAgentsOpenJobs(): void {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureAiSheets(ss);
+  activateAiSheet(ss, AI_SHEETS.JOBS);
+}
+
+export function ftAgentsOpenLogs(): void {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureAiSheets(ss);
+  activateAiSheet(ss, AI_SHEETS.LOGS);
+}
+
+export function ftAgentsRunCompletion(): void {
+  runJob("completion");
+}
+
+export function ftAgentsRunScore(): void {
+  runJob("score");
+}
+
+export function ftAgentsRunCommercialScore(): void {
+  runJob("commercial_score");
+}
+
+export function ftAgentsRunKeywords(): void {
+  runJob("keywords");
+}
+
+export function ftAgentsRunAllEnabled(): void {
+  runAllEnabledJobs();
 }
 
 /**
@@ -360,3 +438,14 @@ G.ftDebugPing = ftDebugPing;
 G.ftShowSecretsMissing = ftShowSecretsMissing;
 G.ftHealthCheckSilent = ftHealthCheckSilent;
 G.ftHealthCheck = ftHealthCheck;
+G.ftAgentsConfigure = ftAgentsConfigure;
+G.ftAgentsOpenConfig = ftAgentsOpenConfig;
+G.ftAgentsOpenJobs = ftAgentsOpenJobs;
+G.ftAgentsOpenLogs = ftAgentsOpenLogs;
+G.ftAgentsRunCompletion = ftAgentsRunCompletion;
+G.ftAgentsRunScore = ftAgentsRunScore;
+G.ftAgentsRunCommercialScore = ftAgentsRunCommercialScore;
+G.ftAgentsRunKeywords = ftAgentsRunKeywords;
+G.ftAgentsRunAllEnabled = ftAgentsRunAllEnabled;
+G.runJob = runJob;
+G.runAllEnabledJobs = runAllEnabledJobs;
