@@ -271,3 +271,32 @@ export function ensureSecrets(allowUi: boolean): FtSecrets {
   }
   return promptAndStoreSecrets();
 }
+
+/**
+ * Returns a non-sensitive fingerprint of the currently stored secrets.
+ * Useful to audit whether properties unexpectedly change over time.
+ */
+export function getSecretsFingerprint(): {
+  hasSecrets: boolean;
+  clientIdPreview?: string;
+  clientSecretLen?: number;
+  clientSecretSha256_12?: string;
+} {
+  const s = getSecrets();
+  if (!s) return { hasSecrets: false };
+
+  const clientId = String(s.clientId || "").trim();
+  const clientSecret = String(s.clientSecret || "").trim();
+  const clientIdPreview = clientId ? `${clientId.slice(0, 6)}…${clientId.slice(-4)}` : "(empty)";
+
+  // Hash the secret so we can compare over time without leaking it.
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, clientSecret, Utilities.Charset.UTF_8);
+  const shaHex = bytes.map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+
+  return {
+    hasSecrets: true,
+    clientIdPreview,
+    clientSecretLen: clientSecret.length,
+    clientSecretSha256_12: shaHex.slice(0, 12),
+  };
+}

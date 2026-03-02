@@ -45,9 +45,24 @@ function fetchJson(
   return { code, json, rawText };
 }
 
+function tokenCacheKey(clientId: string, scope: string): string {
+  const id = String(clientId || "").trim();
+  const sc = String(scope || "").trim();
+  // Non-sensitive stable key; avoids cross-client collisions.
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, `${id}|${sc}`, Utilities.Charset.UTF_8);
+  const shaHex = bytes.map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+  return `${CONFIG.TOKEN_CACHE_KEY}_${shaHex.slice(0, 12)}`;
+}
+
 export function getToken(secrets: FtSecrets): string {
+  const clientId = String(secrets?.clientId || "").trim();
+  const clientSecret = String(secrets?.clientSecret || "").trim();
+  const scope = "api_offresdemploiv2 o2dsoffre";
+
   const cache = CacheService.getScriptCache();
-  const cached = cache.get(CONFIG.TOKEN_CACHE_KEY);
+  const cacheKey = tokenCacheKey(clientId, scope);
+
+  const cached = cache.get(cacheKey);
   if (cached) {
     try {
       const obj = JSON.parse(cached) as { access_token: string };
@@ -59,10 +74,13 @@ export function getToken(secrets: FtSecrets): string {
 
   const payload = urlEncodeForm({
     grant_type: "client_credentials",
-    client_id: secrets.clientId,
-    client_secret: secrets.clientSecret,
-    scope: "api_offresdemploiv2 o2dsoffre", // tolerant (FT accepts various scopes per app)
+    // Do NOT include client_id / client_secret in the body when using Basic auth.
+    // Some OAuth servers reject requests with duplicated client authentication.
+    scope,
   });
+
+  // RFC 6749: client authentication via HTTP Basic is widely expected.
+  const basic = Utilities.base64Encode(`${clientId}:${clientSecret}`);
 
   const { code, json, rawText } = fetchJson(CONFIG.OAUTH_TOKEN_URL, {
     method: "post",
@@ -70,22 +88,39 @@ export function getToken(secrets: FtSecrets): string {
     payload,
     headers: {
       Accept: "application/json",
+      Authorization: `Basic ${basic}`,
     },
   });
 
   if (code < 200 || code >= 300 || !json || !json.access_token) {
+    const safeId = clientId ? `${clientId.slice(0, 6)}…${clientId.slice(-4)}` : "(empty)";
     throw new Error(
-      `❌ OAuth token error HTTP ${code}: ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
+      `❌ OAuth token error HTTP ${code} (client_id=${safeId}): ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
     );
   }
 
   const token = (json as TokenResponse).access_token;
-  cache.put(CONFIG.TOKEN_CACHE_KEY, JSON.stringify({ access_token: token }), CONFIG.TOKEN_CACHE_TTL_SECONDS);
+  cache.put(cacheKey, JSON.stringify({ access_token: token }), CONFIG.TOKEN_CACHE_TTL_SECONDS);
   return token;
 }
 
-export function clearTokenCache(): void {
-  CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+export function clearTokenCache(secrets?: FtSecrets): void {
+  const cache = CacheService.getScriptCache();
+  // Backward-compat: clear old fixed key + derived key when possible.
+  try {
+    cache.remove(CONFIG.TOKEN_CACHE_KEY);
+  } catch (_e) {
+    // ignore
+  }
+
+  if (secrets) {
+    try {
+      const cacheKey = tokenCacheKey(String(secrets.clientId || ""), "api_offresdemploiv2 o2dsoffre");
+      cache.remove(cacheKey);
+    } catch (_e) {
+      // ignore
+    }
+  }
 }
 
 function mapOffer(o: any): OfferApi | null {
@@ -187,14 +222,16 @@ function searchOffersOnce(
   });
 
   if (code === 401 && allowRetry401) {
-    // Token likely expired/invalid, clear cache and retry once.
-    clearTokenCache();
+    clearTokenCache(secrets);
     return searchOffersOnce(secrets, opts, range, false);
   }
 
   if (code < 200 || code >= 300) {
+    const safeId = secrets?.clientId
+      ? `${String(secrets.clientId).trim().slice(0, 6)}…${String(secrets.clientId).trim().slice(-4)}`
+      : "(empty)";
     throw new Error(
-      `❌ FT search error HTTP ${code}: ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
+      `❌ FT search error HTTP ${code} (client_id=${safeId}): ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
     );
   }
 

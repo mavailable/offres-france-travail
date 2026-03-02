@@ -1,5 +1,6 @@
 import { CONFIG } from "./config";
-import { getSecrets, promptAndStoreSecrets, ftSetSecretsFromDialog } from "./secrets";
+import { getSecrets, promptAndStoreSecrets, ftSetSecretsFromDialog, getSecretsFingerprint } from "./secrets";
+import { getToken } from "./ftApi";
 import {
   ftUpdateTravailleurSocial_24h,
   ftUpdateTravailleurSocial_7j,
@@ -418,6 +419,55 @@ export function ftSetSecretsFromDialogAndFinalizeInit(secrets: { clientId: strin
 }
 
 /**
+ * Opens a non-blocking popup with a single action to launch secret configuration.
+ */
+export function ftShowSecretsMissing(): void {
+  const ui = SpreadsheetApp.getUi();
+  const resp = ui.alert(
+    "France Travail",
+    "Secrets manquants.\n\nCliquez sur OK pour lancer : Configurer les secrets.",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (resp === ui.Button.OK) {
+    ftConfigureSecrets();
+  }
+}
+
+export function ftConfigureSecrets(): void {
+  promptAndStoreSecrets();
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    ss.toast("Secrets enregistrés dans Script Properties.", "France Travail", 8);
+  } catch (_e) {
+    SpreadsheetApp.getUi().alert("Secrets enregistrés dans Script Properties.");
+  }
+}
+
+export function ftOpenExclusions(): void {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureSheets(ss);
+  activateSheet(ss, CONFIG.SHEET_EXCLUSIONS);
+}
+
+/**
+ * Manual debug entrypoint: run it from Apps Script editor.
+ * - Writes a cell in the active sheet
+ * - Writes Script Properties marker
+ */
+export function ftDebugPing(): void {
+  const ts = new Date().toISOString();
+  PropertiesService.getScriptProperties().setProperty("FT_DEBUG_PING", ts);
+
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheets()[0];
+  sheet.getRange("A1").setValue(`FT_DEBUG_PING ${ts}`);
+
+  console.log(`${CONFIG.LOG_PREFIX} ftDebugPing ${ts}`);
+}
+
+/**
  * GAS entrypoints must be global functions.
  * We re-export wrappers so clasp sees them as top-level.
  */
@@ -480,56 +530,191 @@ export function buildMenu(): void {
     .addSeparator()
     .addItem("Configurer les secrets", "ftConfigureSecrets")
     .addItem("Ouvrir l’onglet Exclusions", "ftOpenExclusions")
+    .addSeparator()
+    .addItem("Debug OAuth", "ftDebugOAuth")
+    .addItem("Debug E2E (auth + maj 24h)", "ftDebugE2E_AuthThenUpdate24h")
     .addToUi();
 }
 
 /**
- * Opens a non-blocking popup with a single action to launch secret configuration.
+ * Diagnostics to audit intermittent OAuth invalid_client.
+ * Logs only non-sensitive fingerprints.
  */
-export function ftShowSecretsMissing(): void {
-  const ui = SpreadsheetApp.getUi();
-  const resp = ui.alert(
-    "France Travail",
-    "Secrets manquants.\n\nCliquez sur OK pour lancer : Configurer les secrets.",
-    ui.ButtonSet.OK_CANCEL
-  );
-
-  if (resp === ui.Button.OK) {
-    ftConfigureSecrets();
-  }
-}
-
-export function ftConfigureSecrets(): void {
-  promptAndStoreSecrets();
-
+export function ftDebugOAuth(): void {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+
+  const fp = (() => {
+    try {
+      return getSecretsFingerprint();
+    } catch (e) {
+      return { hasSecrets: false, error: String(e) } as any;
+    }
+  })();
+
+  let tokenCachePresent = false;
   try {
-    ss.toast("Secrets enregistrés dans Script Properties.", "France Travail", 8);
+    tokenCachePresent = Boolean(CacheService.getScriptCache().get(CONFIG.TOKEN_CACHE_KEY));
   } catch (_e) {
-    SpreadsheetApp.getUi().alert("Secrets enregistrés dans Script Properties.");
+    tokenCachePresent = false;
   }
-}
 
-export function ftOpenExclusions(): void {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureSheets(ss);
-  activateSheet(ss, CONFIG.SHEET_EXCLUSIONS);
+  const initDone = (() => {
+    try {
+      return props.getProperty("FT_INIT_DONE") === "1";
+    } catch (_e) {
+      return false;
+    }
+  })();
+
+  const msgLines = [
+    `initDone=${initDone}`,
+    `tokenCachePresent=${tokenCachePresent}`,
+    `hasSecrets=${Boolean((fp as any).hasSecrets)}`,
+    `clientId=${(fp as any).clientIdPreview || "(n/a)"}`,
+    `clientSecretLen=${(fp as any).clientSecretLen ?? "(n/a)"}`,
+    `clientSecretSha256_12=${(fp as any).clientSecretSha256_12 || "(n/a)"}`,
+  ];
+
+  console.log(`${CONFIG.LOG_PREFIX} Debug OAuth\n- ${msgLines.join("\n- ")}`);
+
+  // Clear token cache to force a fresh token request next run.
+  try {
+    CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+  } catch (_e) {
+    // ignore
+  }
+
+  try {
+    ss.toast(
+      "Debug OAuth: infos loggées (sans secrets) + cache token purgé.\nVoir Executions/Logs.",
+      "France Travail",
+      12
+    );
+  } catch (_e) {
+    SpreadsheetApp.getUi().alert(
+      "France Travail",
+      "Debug OAuth: infos loggées (sans secrets) + cache token purgé.\nVoir Executions/Logs.",
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
 }
 
 /**
- * Manual debug entrypoint: run it from Apps Script editor.
- * - Writes a cell in the active sheet
- * - Writes Script Properties marker
+ * Temporary end-to-end diagnostic:
+ * - logs environment + secret fingerprints
+ * - clears token cache
+ * - attempts OAuth token retrieval
+ * - if OK: runs 24h update
+ * Logs are non-sensitive (no secret/token printed).
  */
-export function ftDebugPing(): void {
-  const ts = new Date().toISOString();
-  PropertiesService.getScriptProperties().setProperty("FT_DEBUG_PING", ts);
+export function ftDebugE2E_AuthThenUpdate24h(): void {
+  const startedAt = new Date();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheets()[0];
-  sheet.getRange("A1").setValue(`FT_DEBUG_PING ${ts}`);
+  const log: string[] = [];
+  const push = (s: string) => log.push(s);
 
-  console.log(`${CONFIG.LOG_PREFIX} ftDebugPing ${ts}`);
+  push(`ts=${startedAt.toISOString()}`);
+
+  // Spreadsheet/script context
+  try {
+    push(`spreadsheetId=${ss.getId()}`);
+    push(`spreadsheetUrl=${ss.getUrl()}`);
+  } catch (e) {
+    push(`spreadsheetAccessError=${String(e)}`);
+  }
+
+  try {
+    push(`scriptTimeZone=${Session.getScriptTimeZone()}`);
+  } catch (_e) {
+    // ignore
+  }
+
+  // Properties fingerprints
+  try {
+    const fp = getSecretsFingerprint();
+    push(`hasSecrets=${fp.hasSecrets}`);
+    push(`clientId=${fp.clientIdPreview || "(n/a)"}`);
+    push(`clientSecretLen=${fp.clientSecretLen ?? "(n/a)"}`);
+    push(`clientSecretSha256_12=${fp.clientSecretSha256_12 || "(n/a)"}`);
+  } catch (e) {
+    push(`fingerprintError=${String(e)}`);
+  }
+
+  // Token cache state
+  try {
+    const present = Boolean(CacheService.getScriptCache().get(CONFIG.TOKEN_CACHE_KEY));
+    push(`tokenCachePresentBefore=${present}`);
+  } catch (e) {
+    push(`tokenCacheCheckError=${String(e)}`);
+  }
+
+  // Clear token cache to ensure we're really testing auth
+  try {
+    CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+    push("tokenCacheCleared=true");
+  } catch (e) {
+    push(`tokenCacheClearError=${String(e)}`);
+  }
+
+  console.log(`${CONFIG.LOG_PREFIX} Debug E2E start\n- ${log.join("\n- ")}`);
+
+  // Step 1: OAuth token test
+  let authOk = false;
+  try {
+    const secrets = getSecrets();
+    if (!secrets) {
+      throw new Error("Secrets manquants (getSecrets()=null)");
+    }
+
+    const token = getToken(secrets);
+    authOk = Boolean(token);
+    // never print token; just print its length
+    push(`oauthTokenOk=${authOk}`);
+    push(`oauthTokenLen=${token ? String(token).length : "0"}`);
+  } catch (e) {
+    push(`oauthTokenError=${(e && (e as any).message) ? (e as any).message : String(e)}`);
+  }
+
+  console.log(`${CONFIG.LOG_PREFIX} Debug E2E auth\n- ${log.join("\n- ")}`);
+
+  if (!authOk) {
+    try {
+      ss.toast(
+        "Debug E2E: échec auth OAuth. Voir Executions/Logs.",
+        "France Travail",
+        15
+      );
+    } catch (_e) {
+      // ignore
+    }
+    return;
+  }
+
+  // Step 2: run update 24h
+  try {
+    push("update24hStart=true");
+    const t0 = Date.now();
+    ftUpdateTravailleurSocial_24h();
+    push(`update24hOk=true`);
+    push(`update24hMs=${Date.now() - t0}`);
+  } catch (e) {
+    push(`update24hError=${(e && (e as any).message) ? (e as any).message : String(e)}`);
+  }
+
+  push(`doneTs=${new Date().toISOString()}`);
+  console.log(`${CONFIG.LOG_PREFIX} Debug E2E done\n- ${log.join("\n- ")}`);
+
+  try {
+    ss.toast(
+      "Debug E2E terminé. Voir Executions/Logs.",
+      "France Travail",
+      10
+    );
+  } catch (_e) {
+    // ignore
+  }
 }
 
 // Re-export job functions as global symbols

@@ -92,6 +92,6 @@ export const HEADERS_OFFRES: string[] = [
 ];
 
 export const HEADERS_EXCLUSIONS: string[] = [
-  "Exclure si intitulé contient / match",
+  "Exclure si Poste contient / match",
   "Exclure si entreprise contient / match",
 ];

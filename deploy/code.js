@@ -85,7 +85,7 @@
     "offre_ID"
   ];
   var HEADERS_EXCLUSIONS = [
-    "Exclure si intitul\xE9 contient / match",
+    "Exclure si Poste contient / match",
     "Exclure si entreprise contient / match"
   ];
 
@@ -320,6 +320,21 @@
     }
     return promptAndStoreSecrets();
   }
+  function getSecretsFingerprint() {
+    const s = getSecrets();
+    if (!s) return { hasSecrets: false };
+    const clientId = String(s.clientId || "").trim();
+    const clientSecret = String(s.clientSecret || "").trim();
+    const clientIdPreview = clientId ? `${clientId.slice(0, 6)}\u2026${clientId.slice(-4)}` : "(empty)";
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, clientSecret, Utilities.Charset.UTF_8);
+    const shaHex = bytes.map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+    return {
+      hasSecrets: true,
+      clientIdPreview,
+      clientSecretLen: clientSecret.length,
+      clientSecretSha256_12: shaHex.slice(0, 12)
+    };
+  }
 
   // src/ftApi.ts
   function urlEncodeForm(data) {
@@ -337,9 +352,20 @@
     }
     return { code, json, rawText };
   }
+  function tokenCacheKey(clientId, scope) {
+    const id = String(clientId || "").trim();
+    const sc = String(scope || "").trim();
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, `${id}|${sc}`, Utilities.Charset.UTF_8);
+    const shaHex = bytes.map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+    return `${CONFIG.TOKEN_CACHE_KEY}_${shaHex.slice(0, 12)}`;
+  }
   function getToken(secrets) {
+    const clientId = String((secrets == null ? void 0 : secrets.clientId) || "").trim();
+    const clientSecret = String((secrets == null ? void 0 : secrets.clientSecret) || "").trim();
+    const scope = "api_offresdemploiv2 o2dsoffre";
     const cache = CacheService.getScriptCache();
-    const cached = cache.get(CONFIG.TOKEN_CACHE_KEY);
+    const cacheKey = tokenCacheKey(clientId, scope);
+    const cached = cache.get(cacheKey);
     if (cached) {
       try {
         const obj = JSON.parse(cached);
@@ -349,30 +375,43 @@
     }
     const payload = urlEncodeForm({
       grant_type: "client_credentials",
-      client_id: secrets.clientId,
-      client_secret: secrets.clientSecret,
-      scope: "api_offresdemploiv2 o2dsoffre"
-      // tolerant (FT accepts various scopes per app)
+      // Do NOT include client_id / client_secret in the body when using Basic auth.
+      // Some OAuth servers reject requests with duplicated client authentication.
+      scope
     });
+    const basic = Utilities.base64Encode(`${clientId}:${clientSecret}`);
     const { code, json, rawText } = fetchJson(CONFIG.OAUTH_TOKEN_URL, {
       method: "post",
       contentType: "application/x-www-form-urlencoded",
       payload,
       headers: {
-        Accept: "application/json"
+        Accept: "application/json",
+        Authorization: `Basic ${basic}`
       }
     });
     if (code < 200 || code >= 300 || !json || !json.access_token) {
+      const safeId = clientId ? `${clientId.slice(0, 6)}\u2026${clientId.slice(-4)}` : "(empty)";
       throw new Error(
-        `\u274C OAuth token error HTTP ${code}: ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
+        `\u274C OAuth token error HTTP ${code} (client_id=${safeId}): ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
       );
     }
     const token = json.access_token;
-    cache.put(CONFIG.TOKEN_CACHE_KEY, JSON.stringify({ access_token: token }), CONFIG.TOKEN_CACHE_TTL_SECONDS);
+    cache.put(cacheKey, JSON.stringify({ access_token: token }), CONFIG.TOKEN_CACHE_TTL_SECONDS);
     return token;
   }
-  function clearTokenCache() {
-    CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+  function clearTokenCache(secrets) {
+    const cache = CacheService.getScriptCache();
+    try {
+      cache.remove(CONFIG.TOKEN_CACHE_KEY);
+    } catch (_e) {
+    }
+    if (secrets) {
+      try {
+        const cacheKey = tokenCacheKey(String(secrets.clientId || ""), "api_offresdemploiv2 o2dsoffre");
+        cache.remove(cacheKey);
+      } catch (_e) {
+      }
+    }
   }
   function mapOffer(o) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w;
@@ -441,12 +480,13 @@
       }
     });
     if (code === 401 && allowRetry401) {
-      clearTokenCache();
+      clearTokenCache(secrets);
       return searchOffersOnce(secrets, opts, range, false);
     }
     if (code < 200 || code >= 300) {
+      const safeId = (secrets == null ? void 0 : secrets.clientId) ? `${String(secrets.clientId).trim().slice(0, 6)}\u2026${String(secrets.clientId).trim().slice(-4)}` : "(empty)";
       throw new Error(
-        `\u274C FT search error HTTP ${code}: ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
+        `\u274C FT search error HTTP ${code} (client_id=${safeId}): ${rawText ? rawText.slice(0, 600) : "(empty body)"}`
       );
     }
     const results = json && (json.resultats || json.results || json.offres);
@@ -1080,37 +1120,6 @@ Corrections :
     } catch (_e) {
     }
   }
-  function onOpen() {
-    try {
-      PropertiesService.getScriptProperties().setProperty(
-        "FT_DEBUG_LAST_ONOPEN",
-        (/* @__PURE__ */ new Date()).toISOString()
-      );
-    } catch (e) {
-    }
-    console.log(`${CONFIG.LOG_PREFIX} onOpen fired at ${(/* @__PURE__ */ new Date()).toISOString()}`);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    ensureSheets(ss);
-    buildMenu();
-    try {
-      ftHealthCheckSilent();
-    } catch (_e) {
-    }
-    try {
-      if (!isInitialized()) {
-        ss.toast(
-          "Premi\xE8re utilisation : autorisez le script.\nMenu France Travail \xBB Initialiser / Autoriser",
-          "France Travail",
-          20
-        );
-      }
-    } catch (_e) {
-    }
-  }
-  function buildMenu() {
-    const ui = SpreadsheetApp.getUi();
-    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addToUi();
-  }
   function ftShowSecretsMissing() {
     const ui = SpreadsheetApp.getUi();
     const resp = ui.alert(
@@ -1143,6 +1152,176 @@ Corrections :
     const sheet = ss.getSheets()[0];
     sheet.getRange("A1").setValue(`FT_DEBUG_PING ${ts}`);
     console.log(`${CONFIG.LOG_PREFIX} ftDebugPing ${ts}`);
+  }
+  function onOpen() {
+    try {
+      PropertiesService.getScriptProperties().setProperty(
+        "FT_DEBUG_LAST_ONOPEN",
+        (/* @__PURE__ */ new Date()).toISOString()
+      );
+    } catch (e) {
+    }
+    console.log(`${CONFIG.LOG_PREFIX} onOpen fired at ${(/* @__PURE__ */ new Date()).toISOString()}`);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ensureSheets(ss);
+    buildMenu();
+    try {
+      ftHealthCheckSilent();
+    } catch (_e) {
+    }
+    try {
+      if (!isInitialized()) {
+        ss.toast(
+          "Premi\xE8re utilisation : autorisez le script.\nMenu France Travail \xBB Initialiser / Autoriser",
+          "France Travail",
+          20
+        );
+      }
+    } catch (_e) {
+    }
+  }
+  function buildMenu() {
+    const ui = SpreadsheetApp.getUi();
+    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addSeparator().addItem("Debug OAuth", "ftDebugOAuth").addItem("Debug E2E (auth + maj 24h)", "ftDebugE2E_AuthThenUpdate24h").addToUi();
+  }
+  function ftDebugOAuth() {
+    var _a;
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const props = PropertiesService.getScriptProperties();
+    const fp = (() => {
+      try {
+        return getSecretsFingerprint();
+      } catch (e) {
+        return { hasSecrets: false, error: String(e) };
+      }
+    })();
+    let tokenCachePresent = false;
+    try {
+      tokenCachePresent = Boolean(CacheService.getScriptCache().get(CONFIG.TOKEN_CACHE_KEY));
+    } catch (_e) {
+      tokenCachePresent = false;
+    }
+    const initDone = (() => {
+      try {
+        return props.getProperty("FT_INIT_DONE") === "1";
+      } catch (_e) {
+        return false;
+      }
+    })();
+    const msgLines = [
+      `initDone=${initDone}`,
+      `tokenCachePresent=${tokenCachePresent}`,
+      `hasSecrets=${Boolean(fp.hasSecrets)}`,
+      `clientId=${fp.clientIdPreview || "(n/a)"}`,
+      `clientSecretLen=${(_a = fp.clientSecretLen) != null ? _a : "(n/a)"}`,
+      `clientSecretSha256_12=${fp.clientSecretSha256_12 || "(n/a)"}`
+    ];
+    console.log(`${CONFIG.LOG_PREFIX} Debug OAuth
+- ${msgLines.join("\n- ")}`);
+    try {
+      CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+    } catch (_e) {
+    }
+    try {
+      ss.toast(
+        "Debug OAuth: infos logg\xE9es (sans secrets) + cache token purg\xE9.\nVoir Executions/Logs.",
+        "France Travail",
+        12
+      );
+    } catch (_e) {
+      SpreadsheetApp.getUi().alert(
+        "France Travail",
+        "Debug OAuth: infos logg\xE9es (sans secrets) + cache token purg\xE9.\nVoir Executions/Logs.",
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    }
+  }
+  function ftDebugE2E_AuthThenUpdate24h() {
+    var _a;
+    const startedAt = /* @__PURE__ */ new Date();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const log = [];
+    const push = (s) => log.push(s);
+    push(`ts=${startedAt.toISOString()}`);
+    try {
+      push(`spreadsheetId=${ss.getId()}`);
+      push(`spreadsheetUrl=${ss.getUrl()}`);
+    } catch (e) {
+      push(`spreadsheetAccessError=${String(e)}`);
+    }
+    try {
+      push(`scriptTimeZone=${Session.getScriptTimeZone()}`);
+    } catch (_e) {
+    }
+    try {
+      const fp = getSecretsFingerprint();
+      push(`hasSecrets=${fp.hasSecrets}`);
+      push(`clientId=${fp.clientIdPreview || "(n/a)"}`);
+      push(`clientSecretLen=${(_a = fp.clientSecretLen) != null ? _a : "(n/a)"}`);
+      push(`clientSecretSha256_12=${fp.clientSecretSha256_12 || "(n/a)"}`);
+    } catch (e) {
+      push(`fingerprintError=${String(e)}`);
+    }
+    try {
+      const present = Boolean(CacheService.getScriptCache().get(CONFIG.TOKEN_CACHE_KEY));
+      push(`tokenCachePresentBefore=${present}`);
+    } catch (e) {
+      push(`tokenCacheCheckError=${String(e)}`);
+    }
+    try {
+      CacheService.getScriptCache().remove(CONFIG.TOKEN_CACHE_KEY);
+      push("tokenCacheCleared=true");
+    } catch (e) {
+      push(`tokenCacheClearError=${String(e)}`);
+    }
+    console.log(`${CONFIG.LOG_PREFIX} Debug E2E start
+- ${log.join("\n- ")}`);
+    let authOk = false;
+    try {
+      const secrets = getSecrets();
+      if (!secrets) {
+        throw new Error("Secrets manquants (getSecrets()=null)");
+      }
+      const token = getToken(secrets);
+      authOk = Boolean(token);
+      push(`oauthTokenOk=${authOk}`);
+      push(`oauthTokenLen=${token ? String(token).length : "0"}`);
+    } catch (e) {
+      push(`oauthTokenError=${e && e.message ? e.message : String(e)}`);
+    }
+    console.log(`${CONFIG.LOG_PREFIX} Debug E2E auth
+- ${log.join("\n- ")}`);
+    if (!authOk) {
+      try {
+        ss.toast(
+          "Debug E2E: \xE9chec auth OAuth. Voir Executions/Logs.",
+          "France Travail",
+          15
+        );
+      } catch (_e) {
+      }
+      return;
+    }
+    try {
+      push("update24hStart=true");
+      const t0 = Date.now();
+      ftUpdateTravailleurSocial_24h();
+      push(`update24hOk=true`);
+      push(`update24hMs=${Date.now() - t0}`);
+    } catch (e) {
+      push(`update24hError=${e && e.message ? e.message : String(e)}`);
+    }
+    push(`doneTs=${(/* @__PURE__ */ new Date()).toISOString()}`);
+    console.log(`${CONFIG.LOG_PREFIX} Debug E2E done
+- ${log.join("\n- ")}`);
+    try {
+      ss.toast(
+        "Debug E2E termin\xE9. Voir Executions/Logs.",
+        "France Travail",
+        10
+      );
+    } catch (_e) {
+    }
   }
   var G = (function() {
     return Function("return this")();
