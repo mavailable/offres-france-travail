@@ -530,9 +530,8 @@ export function buildMenu(): void {
     .addSeparator()
     .addItem("Configurer les secrets", "ftConfigureSecrets")
     .addItem("Ouvrir l’onglet Exclusions", "ftOpenExclusions")
-    .addSeparator()
-    .addItem("Debug OAuth", "ftDebugOAuth")
-    .addItem("Debug E2E (auth + maj 24h)", "ftDebugE2E_AuthThenUpdate24h")
+    // NOTE: entrées "Debug" volontairement retirées du menu pour usage normal.
+    // Les fonctions restent disponibles (exécution manuelle / logs) si besoin.
     .addToUi();
 }
 

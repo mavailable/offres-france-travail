@@ -24,9 +24,25 @@ function toDate(iso: string): Date {
 }
 
 function parseHoursPerWeek(text: string): number | null {
-  const s = String(text || "");
-  // Match e.g. "35H/semaine", "21 H / semaine", etc.
-  const m = s.match(/(\d{1,2}(?:[.,]\d+)?)\s*H\s*\/?\s*semaine/i);
+  const s = String(text || "").trim();
+
+  // Supported examples:
+  // - "35H/semaine", "21 H / semaine"
+  // - "17H50/semaine" (=> 17 + 50/60)
+  // - "38H30/semaine" (=> 38.5)
+
+  // Prefer HHhMM format if present.
+  const hm = s.match(/\b(\d{1,2})\s*H\s*(\d{2})\s*\/?\s*semaine\b/i);
+  if (hm) {
+    const h = Number(hm[1]);
+    const m = Number(hm[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    if (m < 0 || m > 59) return null;
+    return h + m / 60;
+  }
+
+  // Fallback: decimal hours.
+  const m = s.match(/\b(\d{1,2}(?:[.,]\d+)?)\s*H\s*\/?\s*semaine\b/i);
   if (!m) return null;
   const n = Number(String(m[1]).replace(",", "."));
   return Number.isFinite(n) ? n : null;

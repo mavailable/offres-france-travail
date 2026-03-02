@@ -723,8 +723,16 @@
     return d;
   }
   function parseHoursPerWeek(text) {
-    const s = String(text || "");
-    const m = s.match(/(\d{1,2}(?:[.,]\d+)?)\s*H\s*\/?\s*semaine/i);
+    const s = String(text || "").trim();
+    const hm = s.match(/\b(\d{1,2})\s*H\s*(\d{2})\s*\/?\s*semaine\b/i);
+    if (hm) {
+      const h = Number(hm[1]);
+      const m2 = Number(hm[2]);
+      if (!Number.isFinite(h) || !Number.isFinite(m2)) return null;
+      if (m2 < 0 || m2 > 59) return null;
+      return h + m2 / 60;
+    }
+    const m = s.match(/\b(\d{1,2}(?:[.,]\d+)?)\s*H\s*\/?\s*semaine\b/i);
     if (!m) return null;
     const n = Number(String(m[1]).replace(",", "."));
     return Number.isFinite(n) ? n : null;
@@ -1182,7 +1190,7 @@ Corrections :
   }
   function buildMenu() {
     const ui = SpreadsheetApp.getUi();
-    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addSeparator().addItem("Debug OAuth", "ftDebugOAuth").addItem("Debug E2E (auth + maj 24h)", "ftDebugE2E_AuthThenUpdate24h").addToUi();
+    ui.createMenu("France Travail").addItem("Initialiser", "ftInit").addItem("Health check", "ftHealthCheck").addSeparator().addItem("Mettre \xE0 jour (24h)", "ftUpdateTravailleurSocial_24h").addItem("Mettre \xE0 jour (7j)", "ftUpdateTravailleurSocial_7j").addItem("Mettre \xE0 jour (31j)", "ftUpdateTravailleurSocial_31j").addSeparator().addItem("Configurer les secrets", "ftConfigureSecrets").addItem("Ouvrir l\u2019onglet Exclusions", "ftOpenExclusions").addToUi();
   }
   function ftDebugOAuth() {
     var _a;
